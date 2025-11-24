@@ -1,0 +1,5 @@
+recursive-include src/pybaileys/engine *
+recursive-include src/pybaileys/engine/node_modules *
+recursive-include src/pybaileys/engine/vendor/baileys-main/lib *
+recursive-include src/pybaileys/engine/vendor/baileys-main/node_modules *
+include src/pybaileys/engine/package.json

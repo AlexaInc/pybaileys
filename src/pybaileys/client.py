@@ -4,8 +4,11 @@ import json
 import time
 import threading
 import uuid
-import asyncio
 import websocket
+import sys
+from . import bootstrap
+
+sys.stdout.reconfigure(line_buffering=True)
 
 class BaileysError(Exception):
     pass
@@ -18,8 +21,11 @@ class BaileysClient:
         self.responses = {} 
         self.event_listeners = {} 
         self._response_waiters = {}
-        # Access static utils via client.utils.MethodName()
         self.utils = self._UtilsProxy(self)
+        self.port = None
+        self.auth_path = None 
+        self.socket_config = {}
+        self.node_executable = None
 
     class _UtilsProxy:
         def __init__(self, client):
@@ -29,34 +35,67 @@ class BaileysClient:
                 return self.client._call_rpc('STATIC_CALL', {'method': name, 'args': args})
             return method_proxy
 
-    def start(self):
-        """Starts the Node.js engine."""
+    def _reader_thread(self, pipe, prefix):
+        for line in iter(pipe.readline, ''):
+            clean_line = line.strip()
+            if clean_line:
+                print(f"[{prefix}] {clean_line}")
+                if prefix == "NODE" and "PORT:" in clean_line:
+                    self.port = clean_line.split(":")[1]
+        pipe.close()
+
+    def start(self, auth_path="baileys_auth_info", **kwargs):
+        self.auth_path = os.path.abspath(auth_path)
+        self.socket_config = kwargs
+        
+        # 1. Get Node Executable (Modules are already installed!)
+        self.node_executable = bootstrap.setup()
+        
         base_path = os.path.dirname(os.path.abspath(__file__))
         script_path = os.path.join(base_path, 'engine', 'bridge.js')
+        cwd_path = os.path.join(base_path, 'engine')
         
-        if not os.path.exists(os.path.join(base_path, 'engine', 'node_modules')):
-            raise RuntimeError("Please run 'npm install' in the engine directory first.")
+        print(f"[*] Starting Engine...")
+        
+        if not os.path.exists(script_path):
+            raise RuntimeError(f"Bridge file missing: {script_path}")
+
+        # 2. Check if node_modules exists (sanity check)
+        if not os.path.exists(os.path.join(cwd_path, 'node_modules')):
+            raise RuntimeError("Corrupt installation: node_modules missing in package.")
 
         self.process = subprocess.Popen(
-            ['node', script_path],
+            [self.node_executable, script_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            cwd=os.path.join(base_path, 'engine')
+            cwd=cwd_path,
+            bufsize=1,
+            universal_newlines=True
         )
 
-        port = None
-        while True:
-            line = self.process.stdout.readline()
-            if "PORT:" in line:
-                port = line.strip().split(":")[1]
-                break
-            if line == '' and self.process.poll() is not None:
-                err = self.process.stderr.read()
-                raise RuntimeError(f"Engine failed to start:\n{err}")
+        t_out = threading.Thread(target=self._reader_thread, args=(self.process.stdout, "NODE"))
+        t_out.daemon = True
+        t_out.start()
+
+        t_err = threading.Thread(target=self._reader_thread, args=(self.process.stderr, "NODE_ERR"))
+        t_err.daemon = True
+        t_err.start()
+
+        print("[*] Waiting for Port...")
+        
+        start_time = time.time()
+        while self.port is None:
+            if time.time() - start_time > 30:
+                raise TimeoutError("Timed out waiting for Node.js engine.")
+            if self.process.poll() is not None:
+                raise RuntimeError("Node process died unexpectedly.")
+            time.sleep(0.1)
+
+        print(f"[*] Connecting to 127.0.0.1:{self.port}")
 
         self.ws = websocket.WebSocketApp(
-            f"ws://localhost:{port}",
+            f"ws://127.0.0.1:{self.port}",
             on_message=self._on_ws_message,
             on_open=self._on_ws_open,
             on_error=self._on_ws_error
@@ -66,14 +105,16 @@ class BaileysClient:
         t.daemon = True
         t.start()
         
-        self.connected_event.wait(timeout=5)
+        if not self.connected_event.wait(timeout=10):
+            raise TimeoutError("WS Connection timed out")
+            
         self._send_init()
 
     def _on_ws_open(self, ws):
         self.connected_event.set()
 
     def _on_ws_error(self, ws, error):
-        print(f"WebSocket Error: {error}")
+        print(f"[WS Error]: {error}")
 
     def _on_ws_message(self, ws, message):
         try:
@@ -94,7 +135,7 @@ class BaileysClient:
                     if req_id in self._response_waiters:
                         self._response_waiters[req_id].set()
                 else:
-                    print(f"Async Error from Engine: {err_msg}")
+                    print(f"[Engine Error]: {err_msg}")
 
             elif msg_type == 'EVENT':
                 name = data['name']
@@ -107,7 +148,8 @@ class BaileysClient:
             print(f"Error parsing message: {e}")
 
     def _send_init(self):
-        self._call_rpc('INIT', {}, wait=True)
+        payload = {'auth_path': self.auth_path, 'config': self.socket_config}
+        self._call_rpc('INIT', payload, wait=False)
 
     def _call_rpc(self, cmd, payload, wait=True):
         req_id = str(uuid.uuid4())
@@ -118,13 +160,17 @@ class BaileysClient:
             waiter = threading.Event()
             self._response_waiters[req_id] = waiter
         
-        self.ws.send(json.dumps(payload))
+        try:
+            self.ws.send(json.dumps(payload))
+        except Exception as e:
+            if wait: del self._response_waiters[req_id]
+            raise e
         
         if wait:
             sent = waiter.wait(timeout=30)
             del self._response_waiters[req_id]
             if not sent:
-                raise TimeoutError("Node.js bridge timed out")
+                raise TimeoutError("Bridge request timed out")
             
             response = self.responses.pop(req_id)
             if isinstance(response, Exception):

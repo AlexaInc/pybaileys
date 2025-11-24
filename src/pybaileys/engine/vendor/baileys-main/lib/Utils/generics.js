@@ -298,22 +298,17 @@ async function promiseTimeout(ms, promise) {
 }
 
 const generateMessageID = (userId) => {
-    const data = Buffer.alloc(8 + 20 + 16)
-    data.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 1000)))
-    if (userId) {
-        const id = WABinary_1.jidDecode(userId)
-        if (id?.user) {
-            data.write(id.user, 8)
-            data.write('@c.us', 8 + id.user.length)
-        }
-    }
-    const random = crypto_1.randomBytes(20)
-    random.copy(data, 28)
-    const sha = asciiDecode([ 83, 85, 75, 73 ])
-    const hash = crypto_1.createHash('sha256').update(data).digest()
-    return sha + hash.toString('hex').toUpperCase().substring(0, 16)
-}
+    const timestamp = Date.now().toString();
+    const user = userId || 'unknown';
+    const random = crypto_1.randomBytes(16).toString('hex');
 
+    const hash = crypto_1.createHash('sha256')
+        .update(timestamp + user + random)
+        .digest('hex')
+        .toUpperCase();
+
+    return 'A' + hash.substring(0, 31);
+}
 // code is inspired by whatsmeow
 const generateParticipantHashV2 = (participants) => {
     participants.sort()

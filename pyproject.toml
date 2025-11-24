@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pybaileys"
+version = "1.0.5"
+description = "A Python wrapper for the Baileys WhatsApp Library"
+readme = "README.md"
+authors = [{ name = "Hansaka", email = "your@email.com" }]
+license = { text = "MIT" }
+requires-python = ">=3.7"
+dependencies = [
+    "websocket-client>=1.5.0",
+    "qrcode>=7.0",
+    "nodeenv>=1.8.0"
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pybaileys = ["engine/**/*"]

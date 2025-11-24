@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: pybaileys
+Version: 1.0.5
+Summary: A Python wrapper for the Baileys WhatsApp Library
+Author-email: Hansaka <your@email.com>
+License: MIT
+Requires-Python: >=3.7
+Description-Content-Type: text/markdown
+Requires-Dist: websocket-client>=1.5.0
+Requires-Dist: qrcode>=7.0
+Requires-Dist: nodeenv>=1.8.0
