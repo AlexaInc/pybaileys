@@ -1,0 +1,8 @@
+{
+  "name": "baileys-python-engine",
+  "version": "1.0.0",
+  "dependencies": {
+    "ws": "^8.13.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
