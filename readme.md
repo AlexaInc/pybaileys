@@ -27,7 +27,7 @@
 pip install pybaileys
 ```
 
-> ⏳ *On first run, PyBaileys installs a Node.js runtime automatically. This may take a minute.*
+
 
 ---
 
